@@ -40,7 +40,7 @@ class Server_Session:
 
     def update_user_token(
         self, session_id: str, access_token: str = None, refresh_token: str = None
-    ):
+    ) -> bool:
         original_id = self.deserialize_id(session_id)
 
         if not original_id:
@@ -57,7 +57,7 @@ class Server_Session:
 
         return True
 
-    def get_user_tokens(self, session_id):
+    def get_user_tokens(self, session_id: str) -> dict[str, str]:
         original_id = self.deserialize_id(session_id)
 
         if not original_id:
@@ -76,15 +76,15 @@ class Server_Session:
             "refresh_token": refresh_token.decode("ascii"),
         }
 
-    def get_access_token(self, session_id):
+    def get_access_token(self, session_id: str) -> str:
         user_tokens = self.get_user_tokens(session_id)
         return user_tokens["access_token"] if user_tokens else None
 
-    def get_refresh_token(self, session_id):
+    def get_refresh_token(self, session_id: str) -> str:
         user_tokens = self.get_user_tokens(session_id)
         return user_tokens["refresh_token"] if user_tokens else None
 
-    def delete_user_token(self, session_id):
+    def delete_user_token(self, session_id: str) -> bool:
         original_id = self.deserialize_id(session_id)
 
         if not original_id:
@@ -94,11 +94,11 @@ class Server_Session:
 
         return True
 
-    def token_exists(self, session_id):
+    def token_exists(self, session_id: str) -> bool:
         original_id = self.deserialize_id(session_id)
         return self.r.exists(original_id) if original_id else False
 
-    def deserialize_id(self, signed_id):
+    def deserialize_id(self, signed_id: str) -> str:
         try:
             original_id = self.serializer.loads(signed_id)
         except Exception as e:
