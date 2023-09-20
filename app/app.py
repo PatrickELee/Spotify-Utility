@@ -27,6 +27,8 @@ from flask import (
     url_for,
 )
 
+import server_session
+
 env_path = Path(".") / ".env"
 load_dotenv(dotenv_path=env_path)
 
@@ -46,9 +48,13 @@ URLs = {
     "token": "https://accounts.spotify.com/api/token",
 }
 
+Server_Session = None
+
 
 def api_request(api_url, params={}):
-    req_headers = {"Authorization": f"Bearer {session['tokens']['access_token']}"}
+    access_token = Server_Session.get_access_token(request.cookies.get("session_id"))
+
+    req_headers = {"Authorization": f"Bearer {access_token}"}
 
     res = requests.get(api_url, ME_URL, headers=req_headers)
     res_data = res.json()
@@ -132,20 +138,24 @@ def create_app():
             )
             abort(res.status_code)
 
-        session["tokens"] = {
-            "access_token": res_data.get("access_token"),
-            "refresh_token": res_data.get("refresh_token"),
-        }
+        session_id = Server_Session.add_user_token(
+            res_data.get("access_token"), res_data.get("refresh_token")
+        )
 
         session["cache_data"] = {"something": "Hello there"}
 
-        return redirect(url_for("me"))
+        res = make_response(redirect(url_for("me")))
+        res.set_cookie("session_id", session_id)
+
+        return res
 
     @app.route("/refresh")
     def refresh():
         payload = {
             "grant_type": "refresh_token",
-            "refresh_token": session.get("tokens").get("refresh_token"),
+            "refresh_token": Server_Session.get_refresh_token(
+                request.cookies.get("session_id")
+            ),
         }
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
@@ -154,13 +164,17 @@ def create_app():
         )
         res_data = res.json()
 
-        session["tokens"]["access_token"] = res_data.get("access_token")
+        Server_Session.update_user_token(
+            request.cookies.get("session_id"), access_token=res_data.get("access_token")
+        )
 
-        return json.dumps(session["tokens"])
+        return json.dumps(
+            Server_Session.get_user_tokens(request.cookies.get("session_id"))
+        )
 
     @app.route("/me")
     def me():
-        if "tokens" not in session:
+        if not Server_Session.token_exists(request.cookies.get("session_id")):
             app.logger.error("No tokens in session.")
             abort(400)
 
@@ -175,7 +189,7 @@ def create_app():
 
     @app.route("/duplicate_songs")
     def duplicate_songs():
-        if "tokens" not in session:
+        if not Server_Session.token_exists(request.cookies.get("session_id")):
             app.logger.error("No tokens in session.")
             abort(400)
 
@@ -207,7 +221,7 @@ def create_app():
 
     @app.route("/recache")
     def recache():
-        if "tokens" not in session:
+        if not Server_Session.token_exists(request.cookies.get("session_id")):
             app.logger.error("No tokens in session.")
             abort(400)
 
@@ -295,5 +309,6 @@ def create_app():
 
 
 if __name__ == "__main__":
+    Server_Session = server_session.Server_Session()
     app = create_app()
     app.run(debug=True)
