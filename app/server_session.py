@@ -16,13 +16,6 @@ class Server_Session:
         self.r = redis.Redis()
         self.serializer = URLSafeSerializer(SECRET_KEY, salt="api")
 
-    def generate_ids(self):
-        base_session_id = secrets.token_urlsafe(32)
-        redis_session_id = "user" + base_session_id
-        signed_redis_session_id = self.serializer.dumps(redis_session_id)
-
-        return redis_session_id, signed_redis_session_id
-
     def add_user_token(self, access_token: str, refresh_token: str) -> str:
         user_info = {
             "access_token": access_token,
@@ -97,6 +90,13 @@ class Server_Session:
     def token_exists(self, session_id: str) -> bool:
         original_id = self.deserialize_id(session_id)
         return self.r.exists(original_id) if original_id else False
+
+    def generate_ids(self) -> tuple[str, str]:
+        base_session_id = secrets.token_urlsafe(32)
+        redis_session_id = "user" + base_session_id
+        signed_redis_session_id = self.serializer.dumps(redis_session_id)
+
+        return redis_session_id, signed_redis_session_id
 
     def deserialize_id(self, signed_id: str) -> str:
         try:
