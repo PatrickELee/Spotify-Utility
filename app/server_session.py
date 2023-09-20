@@ -69,7 +69,7 @@ class Server_Session:
             )
         except ValueError as e:
             print("No tokens found for given user id: " + str(e))
-            return None, None
+            return None
 
         return {
             "access_token": access_token.decode("ascii"),
@@ -77,16 +77,17 @@ class Server_Session:
         }
 
     def get_access_token(self, session_id):
-        return self.get_user_tokens(session_id)["access_token"]
+        user_tokens = self.get_user_tokens(session_id)
+        return user_tokens["access_token"] if user_tokens else None
 
     def get_refresh_token(self, session_id):
-        return self.get_user_tokens(session_id)["refresh_token"]
+        user_tokens = self.get_user_tokens(session_id)
+        return user_tokens["refresh_token"] if user_tokens else None
 
     def delete_user_token(self, session_id):
-        try:
-            original_id = self.serializer.loads(session_id)
-        except Exception as e:
-            print("Verification failed: " + e)
+        original_id = self.deserialize_id(session_id)
+
+        if not original_id:
             return False
 
         self.r.hdel(original_id, "access_token", "refresh_token")
