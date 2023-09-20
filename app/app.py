@@ -27,6 +27,7 @@ from flask import (
     url_for,
 )
 
+import spotify
 import server_session
 
 env_path = Path(".") / ".env"
@@ -49,6 +50,7 @@ URLs = {
 }
 
 Server_Session = None
+sc = None
 
 
 def api_request(api_url, params={}):
@@ -56,7 +58,7 @@ def api_request(api_url, params={}):
 
     req_headers = {"Authorization": f"Bearer {access_token}"}
 
-    res = requests.get(api_url, ME_URL, headers=req_headers)
+    res = requests.get(api_url, headers=req_headers)
     res_data = res.json()
 
     if res.status_code != 200:
@@ -72,6 +74,15 @@ def api_request(api_url, params={}):
 def create_app():
     app = Flask(__name__)
     app.secret_key = secrets.token_urlsafe(32)
+
+    def get_access_token():
+        return Server_Session.get_access_token(request.cookies.get("session_id"))
+
+    def get_refresh_token():
+        return Server_Session.get_refresh_token(request.cookies.get("session_id"))
+
+    def tokens_exist():
+        return Server_Session.token_exists(request.cookies.get("session_id"))
 
     @app.route("/")
     def index():
@@ -107,7 +118,6 @@ def create_app():
 
         res = make_response(redirect(f"{AUTH_URL}/?{urlencode(payload)}"))
         res.set_cookie("spotify_auth_state", state)
-
         return res
 
     @app.route("/callback")
@@ -122,25 +132,9 @@ def create_app():
             app.logger.error("State mismatch: %s != %s", stored_state, state)
             abort(400)
 
-        payload = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": REDIRECT_URI,
-        }
+        access_token, refresh_token = sc.get_tokens(code).values()
 
-        res = requests.post(TOKEN_URL, auth=(CLIENT_ID, CLIENT_SECRET), data=payload)
-        res_data = res.json()
-
-        if res_data.get("error") or res.status_code != 200:
-            print(
-                "Failed to receive token: %s",
-                res_data.get("error", "No error information received."),
-            )
-            abort(res.status_code)
-
-        session_id = Server_Session.add_user_token(
-            res_data.get("access_token"), res_data.get("refresh_token")
-        )
+        session_id = Server_Session.add_user_token(access_token, refresh_token)
 
         session["cache_data"] = {"something": "Hello there"}
 
@@ -151,21 +145,13 @@ def create_app():
 
     @app.route("/refresh")
     def refresh():
-        payload = {
-            "grant_type": "refresh_token",
-            "refresh_token": Server_Session.get_refresh_token(
-                request.cookies.get("session_id")
-            ),
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        refresh_token = get_refresh_token()
 
-        res = requests.post(
-            TOKEN_URL, auth=(CLIENT_ID, CLIENT_SECRET), data=payload, headers=headers
-        )
-        res_data = res.json()
+        access_token = sc.refresh_token(refresh_token=refresh_token)
 
         Server_Session.update_user_token(
-            request.cookies.get("session_id"), access_token=res_data.get("access_token")
+            request.cookies.get("session_id"),
+            access_token=access_token,
         )
 
         return json.dumps(
@@ -174,11 +160,11 @@ def create_app():
 
     @app.route("/me")
     def me():
-        if not Server_Session.token_exists(request.cookies.get("session_id")):
+        if not tokens_exist():
             app.logger.error("No tokens in session.")
             abort(400)
 
-        res_data = api_request(URLs["base"].format(endpoint=URLs["me"]))
+        res_data = sc.me(get_access_token())
 
         return render_template(
             "me.html",
@@ -189,7 +175,7 @@ def create_app():
 
     @app.route("/duplicate_songs")
     def duplicate_songs():
-        if not Server_Session.token_exists(request.cookies.get("session_id")):
+        if not tokens_exist():
             app.logger.error("No tokens in session.")
             abort(400)
 
@@ -221,7 +207,7 @@ def create_app():
 
     @app.route("/recache")
     def recache():
-        if not Server_Session.token_exists(request.cookies.get("session_id")):
+        if not tokens_exist():
             app.logger.error("No tokens in session.")
             abort(400)
 
@@ -310,5 +296,6 @@ def create_app():
 
 if __name__ == "__main__":
     Server_Session = server_session.Server_Session()
+    sc = spotify.Spotify_Client()
     app = create_app()
     app.run(debug=True)
