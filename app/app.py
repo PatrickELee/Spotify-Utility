@@ -77,7 +77,6 @@ def create_app():
             secrets.choice(string.ascii_uppercase + string.digits) for _ in range(16)
         )
 
-        # print(f'State: {state}')
         scope = "user-read-private user-read-email playlist-read-private"
 
         if loginout == "logout":
@@ -133,7 +132,6 @@ def create_app():
             )
             abort(res.status_code)
 
-        # Load tokens into session
         session["tokens"] = {
             "access_token": res_data.get("access_token"),
             "refresh_token": res_data.get("refresh_token"),
