@@ -1,4 +1,4 @@
-from server_session import Server_Session
+import collections
 import requests
 
 import os
@@ -48,7 +48,7 @@ class Spotify_Client:
             "refresh_token": res.get("refresh_token"),
         }
 
-    def refresh_token(self, refresh_token):
+    def refresh_access_token(self, refresh_token):
         payload = {
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
@@ -63,6 +63,36 @@ class Spotify_Client:
         return self.get(
             access_token=access_token, url=URLs["base"].format(endpoint=URLs["me"])
         )
+
+    def get_full_playlist_data(self, access_token):
+        full_data = []
+        res_data = {
+            "next": URLs["base"].format(endpoint=URLs["me"] + URLs["playlists"])
+        }
+
+        while res_data["next"]:
+            res_data = self.get(access_token=access_token, url=res_data["next"])
+            for item in res_data["items"]:
+                full_data.append([item["name"], item["tracks"], item["description"]])
+        return full_data
+
+    def get_songs_in_playlists(self, access_token):
+        playlists = filter_playlists(self.get_full_playlist_data(access_token))
+        playlists_per_song = collections.defaultdict(list)
+        for name, link_to_playlist in playlists.items():
+            song_res = {"next": link_to_playlist}
+            while song_res["next"]:
+                song_res = self.get(access_token, song_res["next"])
+
+                for item in song_res["items"]:
+                    playlists_per_song[
+                        (item["track"]["name"], item["track"]["artists"][0]["name"])
+                    ].append(name)
+
+        return (playlists, playlists_per_song)
+
+    def get_song(self, access_token, song_link):
+        return self.get(access_token, song_link)
 
     def get(self, access_token, url, params={}):
         req_headers = {"Authorization": f"Bearer {access_token}"}
@@ -86,3 +116,19 @@ class Spotify_Client:
             return None
 
         return res_data
+
+
+def filter_playlists(playlists):
+    playlist_links = {}
+    for playlist_name, playlist_info, description in playlists:
+        if (
+            playlist_info["total"] < 80
+            and playlist_info["total"] >= 10
+            and not (
+                "Person" in description
+                or "Archived" in description
+                or "Exempt" in description
+            )
+        ):
+            playlist_links[playlist_name] = playlist_info["href"]
+    return playlist_links

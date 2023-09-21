@@ -147,7 +147,7 @@ def create_app():
     def refresh():
         refresh_token = get_refresh_token()
 
-        access_token = sc.refresh_token(refresh_token=refresh_token)
+        access_token = sc.refresh_access_token(refresh_token=refresh_token)
 
         Server_Session.update_user_token(
             request.cookies.get("session_id"),
@@ -179,26 +179,18 @@ def create_app():
             app.logger.error("No tokens in session.")
             abort(400)
 
-        data = {}
-        cache_data = None
+        playlists_per_song = {}
 
         try:
-            with open("playlist_links.pk", "rb") as fi:
-                data = pickle.load(fi)
-
+            with open("songs.pk", "rb") as fi:
+                playlists_per_song = pickle.load(fi)
         except FileNotFoundError as e:
-            print("file not found, continuing to stuff")
-        else:
-            try:
-                with open("songs.pk", "rb") as fi:
-                    cache_data = pickle.load(fi)
-            except FileNotFoundError as e:
-                print("songs not found despite playlists found")
+            print("songs not found")
 
-        if not cache_data:
-            cache_data = parse_data(data)
+        if not playlists_per_song:
+            playlists_per_song = parse_data()
 
-        to_string = print_duplicates(cache_data)
+        to_string = print_duplicates(playlists_per_song)
         print("".join(to_string))
 
         session["cache_data"] = to_string
@@ -215,70 +207,16 @@ def create_app():
 
         return redirect(url_for("me"))
 
-    def get_full_data():
-        full_data = []
-        res_data = {
-            "next": URLs["base"].format(endpoint=URLs["me"] + URLs["playlists"])
-        }
-
-        while res_data["next"]:
-            res_data = api_request(res_data["next"])
-            for item in res_data["items"]:
-                full_data.append([item["name"], item["tracks"], item["description"]])
-        return full_data
-
-    def get_valid_playlists(full_data, cached_links):
-        playlist_links = {}
-        for playlist_name, playlist_info, description in full_data:
-            if (
-                playlist_info["total"] < 80
-                and playlist_info["total"] >= 10
-                and not (
-                    "Person" in description
-                    or "Archived" in description
-                    or "Exempt" in description
-                )
-                and playlist_name not in cached_links
-            ):
-                playlist_links[playlist_name] = playlist_info["href"]
-        return playlist_links
-
-    def compile_songs(playlist_links):
-        cache_data = collections.defaultdict(list)
-        for name, link in playlist_links.items():
-            song_res = api_request(link)
-
-            for item in song_res["items"]:
-                try:
-                    cache_data[
-                        (item["track"]["name"], item["track"]["artists"][0]["name"])
-                    ].append(name)
-                except TypeError as e:
-                    print("an error has occured\n\n\n\n")
-                    print(item)
-            while song_res["next"]:
-                song_res = api_request(song_res["next"])
-                try:
-                    cache_data[
-                        item["track"]["name"], item["track"]["artists"][0]["name"]
-                    ].append(name)
-                except TypeError as e:
-                    print("an error has occured\n\n\n\n")
-                    print(item)
-        return cache_data
-
-    def parse_data(cached_links):
-        full_data = get_full_data()
-        playlist_links = get_valid_playlists(full_data, cached_links)
-        cache_data = compile_songs(playlist_links)
+    def parse_data():
+        playlists, playlists_per_song = sc.get_songs_in_playlists(get_access_token())
 
         with open("playlist_links.pk", "wb") as fi:
-            pickle.dump(playlist_links, fi)
+            pickle.dump(playlists, fi)
 
         with open("songs.pk", "wb") as fi:
-            pickle.dump(cache_data, fi)
+            pickle.dump(playlists_per_song, fi)
 
-        return cache_data
+        return playlists_per_song
 
     def print_duplicates(cache_data):
         to_string = []
