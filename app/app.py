@@ -1,16 +1,10 @@
-from code import compile_command
 from urllib.parse import urlencode
 import requests
 import json
 import os
-import webbrowser
-import base64
 import secrets
 
-# import api
 import string
-import logging
-import collections
 import pickle
 
 from dotenv import load_dotenv
@@ -39,8 +33,6 @@ SPOTIFY_REDIRECT_URI = os.getenv("REDIRECT_URI")
 REDIRECT_URI = "http://localhost:5000/callback"
 
 AUTH_URL = "https://accounts.spotify.com/authorize"
-TOKEN_URL = "https://accounts.spotify.com/api/token"
-ME_URL = "https://api.spotify.com/v1/me"
 URLs = {
     "base": "https://api.spotify.com/v1{endpoint}",
     "playlists": "/playlists",
@@ -51,24 +43,6 @@ URLs = {
 
 Server_Session = None
 sc = None
-
-
-def api_request(api_url, params={}):
-    access_token = Server_Session.get_access_token(request.cookies.get("session_id"))
-
-    req_headers = {"Authorization": f"Bearer {access_token}"}
-
-    res = requests.get(api_url, headers=req_headers)
-    res_data = res.json()
-
-    if res.status_code != 200:
-        app.logger.error(
-            "Failed to get profile info: %s",
-            res_data.get("error", "No error message returned."),
-        )
-        abort(res.status_code)
-
-    return res_data
 
 
 def create_app():
@@ -95,25 +69,18 @@ def create_app():
         )
 
         scope = "user-read-private user-read-email playlist-read-private"
+        payload = {
+            "client_id": CLIENT_ID,
+            "response_type": "code",
+            "redirect_uri": REDIRECT_URI,
+            "state": state,
+            "scope": scope,
+            "show_dialog": True,
+        }
 
         if loginout == "logout":
-            payload = {
-                "client_id": CLIENT_ID,
-                "response_type": "code",
-                "redirect_uri": REDIRECT_URI,
-                "state": state,
-                "scope": scope,
-                "show_dialog": True,
-            }
-        elif loginout == "login":
-            payload = {
-                "client_id": CLIENT_ID,
-                "response_type": "code",
-                "redirect_uri": REDIRECT_URI,
-                "state": state,
-                "scope": scope,
-            }
-        else:
+            payload["show_dialog"] = True
+        elif loginout != "login":
             abort(404)
 
         res = make_response(redirect(f"{AUTH_URL}/?{urlencode(payload)}"))
@@ -203,7 +170,7 @@ def create_app():
             app.logger.error("No tokens in session.")
             abort(400)
 
-        _ = parse_data([])
+        parse_data()
 
         return redirect(url_for("me"))
 

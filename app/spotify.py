@@ -64,7 +64,7 @@ class Spotify_Client:
             access_token=access_token, url=URLs["base"].format(endpoint=URLs["me"])
         )
 
-    def get_full_playlist_data(self, access_token):
+    def get_self_playlist_data(self, access_token):
         full_data = []
         res_data = {
             "next": URLs["base"].format(endpoint=URLs["me"] + URLs["playlists"])
@@ -77,7 +77,7 @@ class Spotify_Client:
         return full_data
 
     def get_songs_in_playlists(self, access_token):
-        playlists = filter_playlists(self.get_full_playlist_data(access_token))
+        playlists = filter_playlists(self.get_self_playlist_data(access_token))
         playlists_per_song = collections.defaultdict(list)
         for name, link_to_playlist in playlists.items():
             song_res = {"next": link_to_playlist}
@@ -90,9 +90,6 @@ class Spotify_Client:
                     ].append(name)
 
         return (playlists, playlists_per_song)
-
-    def get_song(self, access_token, song_link):
-        return self.get(access_token, song_link)
 
     def get(self, access_token, url, params={}):
         req_headers = {"Authorization": f"Bearer {access_token}"}
