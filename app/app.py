@@ -1,14 +1,10 @@
 from urllib.parse import urlencode
-import requests
 import json
 import os
 import secrets
 
 import string
 import pickle
-
-from dotenv import load_dotenv
-from pathlib import Path
 
 from flask import (
     abort,
@@ -24,8 +20,6 @@ from flask import (
 import spotify
 import server_session
 
-env_path = Path(".") / ".env"
-load_dotenv(dotenv_path=env_path)
 
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
@@ -41,8 +35,8 @@ URLs = {
     "token": "https://accounts.spotify.com/api/token",
 }
 
-Server_Session = None
-sc = None
+Server_Session = server_session.Server_Session()
+sc = spotify.Spotify_Client()
 
 
 def create_app():
@@ -136,7 +130,7 @@ def create_app():
         return render_template(
             "me.html",
             data=res_data,
-            tokens=session.get("tokens"),
+            tokens=sc.get_tokens(request.cookies.get("session_id")),
             cache_data=session.get("cache_data"),
         )
 
@@ -200,7 +194,5 @@ def create_app():
 
 
 if __name__ == "__main__":
-    Server_Session = server_session.Server_Session()
-    sc = spotify.Spotify_Client()
     app = create_app()
     app.run(debug=True)

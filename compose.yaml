@@ -1,0 +1,18 @@
+services:
+  redis:
+     image: redislabs/redismod
+     ports:
+       - '6379:6379'
+  server:
+    environment:
+      - CLIENT_ID=e2e90d10318f4743a4c4344c7e9106c3
+      - CLIENT_SECRET=719f9e8595aa427bbdd32b6b89bc585c
+      - REDIRECT_URI=playlist-info-login://callback
+      - SIGNATURE_SECRET_KEY=346441164340e7fe58d5f065a20820cf
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    ports:
+      - 5000:5000
+    depends_on:
+      - redis

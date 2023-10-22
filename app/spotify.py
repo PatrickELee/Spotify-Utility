@@ -2,9 +2,6 @@ import collections
 import requests
 
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
@@ -37,16 +34,15 @@ class Spotify_Client:
         }
 
         res = self.post(TOKEN_URL, data=payload)
-        if res.get("error"):
-            print(
-                "Failed to receive token: %s",
-                res.get("error", "No error information received."),
-            )
-            return None
-        return {
-            "access_token": res.get("access_token"),
-            "refresh_token": res.get("refresh_token"),
-        }
+
+        return (
+            {
+                "access_token": res.get("access_token"),
+                "refresh_token": res.get("refresh_token"),
+            }
+            if res
+            else None
+        )
 
     def refresh_access_token(self, refresh_token):
         payload = {
@@ -97,6 +93,13 @@ class Spotify_Client:
         res = requests.get(url, headers=req_headers)
         res_data = res.json()
 
+        if res.status_code != 200 or res_data.get("error"):
+            print(
+                "Error, status code != 200: %s",
+                res_data.get("error", "No error information received."),
+            )
+            return None
+
         return res_data
 
     def post(self, url, data={}, headers={}):
@@ -105,10 +108,10 @@ class Spotify_Client:
         )
         res_data = res.json()
 
-        if res.status_code != 200:
+        if res.status_code != 200 or res_data.get("error"):
             print(
                 "Error, status code != 200: %s",
-                res.get("error", "No error information received."),
+                res_data.get("error", "No error information received."),
             )
             return None
 

@@ -2,18 +2,16 @@ import os
 import secrets
 from datetime import timedelta
 
-from dotenv import load_dotenv
 from itsdangerous import URLSafeSerializer
 import redis
 
 
-load_dotenv()
 SECRET_KEY = os.getenv("SIGNATURE_SECRET_KEY")
 
 
 class Server_Session:
     def __init__(self):
-        self.r = redis.Redis()
+        self.r = redis.Redis(host='redis', port=6379)
         self.serializer = URLSafeSerializer(SECRET_KEY, salt="api")
 
     def add_user_token(self, access_token: str, refresh_token: str) -> str:
