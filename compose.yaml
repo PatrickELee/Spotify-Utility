@@ -1,0 +1,18 @@
+services:
+  redis:
+     image: redislabs/redismod
+     ports:
+       - '6379:6379'
+  server:
+    environment:
+      - CLIENT_ID=${CLIENT_ID}
+      - CLIENT_SECRET=${CLIENT_SECRET}
+      - REDIRECT_URI=${REDIRECT_URI}
+      - SIGNATURE_SECRET_KEY=${SIGNATURE_SECRET_KEY}
+    build:
+      context: .
+      dockerfile: ./app/Dockerfile
+    ports:
+      - 5000:5000
+    depends_on:
+      - redis

@@ -1,20 +1,10 @@
-from code import compile_command
 from urllib.parse import urlencode
-import requests
 import json
 import os
-import webbrowser
-import base64
 import secrets
 
-# import api
 import string
-import logging
-import collections
 import pickle
-
-from dotenv import load_dotenv
-from pathlib import Path
 
 from flask import (
     abort,
@@ -27,10 +17,9 @@ from flask import (
     url_for,
 )
 
+import spotify
 import server_session
 
-env_path = Path(".") / ".env"
-load_dotenv(dotenv_path=env_path)
 
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
@@ -38,8 +27,6 @@ SPOTIFY_REDIRECT_URI = os.getenv("REDIRECT_URI")
 REDIRECT_URI = "http://localhost:5000/callback"
 
 AUTH_URL = "https://accounts.spotify.com/authorize"
-TOKEN_URL = "https://accounts.spotify.com/api/token"
-ME_URL = "https://api.spotify.com/v1/me"
 URLs = {
     "base": "https://api.spotify.com/v1{endpoint}",
     "playlists": "/playlists",
@@ -48,30 +35,22 @@ URLs = {
     "token": "https://accounts.spotify.com/api/token",
 }
 
-Server_Session = None
-
-
-def api_request(api_url, params={}):
-    access_token = Server_Session.get_access_token(request.cookies.get("session_id"))
-
-    req_headers = {"Authorization": f"Bearer {access_token}"}
-
-    res = requests.get(api_url, ME_URL, headers=req_headers)
-    res_data = res.json()
-
-    if res.status_code != 200:
-        app.logger.error(
-            "Failed to get profile info: %s",
-            res_data.get("error", "No error message returned."),
-        )
-        abort(res.status_code)
-
-    return res_data
+Server_Session = server_session.Server_Session()
+sc = spotify.Spotify_Client()
 
 
 def create_app():
     app = Flask(__name__)
     app.secret_key = secrets.token_urlsafe(32)
+
+    def get_access_token():
+        return Server_Session.get_access_token(request.cookies.get("session_id"))
+
+    def get_refresh_token():
+        return Server_Session.get_refresh_token(request.cookies.get("session_id"))
+
+    def tokens_exist():
+        return Server_Session.token_exists(request.cookies.get("session_id"))
 
     @app.route("/")
     def index():
@@ -84,30 +63,22 @@ def create_app():
         )
 
         scope = "user-read-private user-read-email playlist-read-private"
+        payload = {
+            "client_id": CLIENT_ID,
+            "response_type": "code",
+            "redirect_uri": REDIRECT_URI,
+            "state": state,
+            "scope": scope,
+            "show_dialog": True,
+        }
 
         if loginout == "logout":
-            payload = {
-                "client_id": CLIENT_ID,
-                "response_type": "code",
-                "redirect_uri": REDIRECT_URI,
-                "state": state,
-                "scope": scope,
-                "show_dialog": True,
-            }
-        elif loginout == "login":
-            payload = {
-                "client_id": CLIENT_ID,
-                "response_type": "code",
-                "redirect_uri": REDIRECT_URI,
-                "state": state,
-                "scope": scope,
-            }
-        else:
+            payload["show_dialog"] = True
+        elif loginout != "login":
             abort(404)
 
         res = make_response(redirect(f"{AUTH_URL}/?{urlencode(payload)}"))
         res.set_cookie("spotify_auth_state", state)
-
         return res
 
     @app.route("/callback")
@@ -122,25 +93,9 @@ def create_app():
             app.logger.error("State mismatch: %s != %s", stored_state, state)
             abort(400)
 
-        payload = {
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": REDIRECT_URI,
-        }
+        access_token, refresh_token = sc.get_tokens(code).values()
 
-        res = requests.post(TOKEN_URL, auth=(CLIENT_ID, CLIENT_SECRET), data=payload)
-        res_data = res.json()
-
-        if res_data.get("error") or res.status_code != 200:
-            print(
-                "Failed to receive token: %s",
-                res_data.get("error", "No error information received."),
-            )
-            abort(res.status_code)
-
-        session_id = Server_Session.add_user_token(
-            res_data.get("access_token"), res_data.get("refresh_token")
-        )
+        session_id = Server_Session.add_user_token(access_token, refresh_token)
 
         session["cache_data"] = {"something": "Hello there"}
 
@@ -151,21 +106,13 @@ def create_app():
 
     @app.route("/refresh")
     def refresh():
-        payload = {
-            "grant_type": "refresh_token",
-            "refresh_token": Server_Session.get_refresh_token(
-                request.cookies.get("session_id")
-            ),
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        refresh_token = get_refresh_token()
 
-        res = requests.post(
-            TOKEN_URL, auth=(CLIENT_ID, CLIENT_SECRET), data=payload, headers=headers
-        )
-        res_data = res.json()
+        access_token = sc.refresh_access_token(refresh_token=refresh_token)
 
         Server_Session.update_user_token(
-            request.cookies.get("session_id"), access_token=res_data.get("access_token")
+            request.cookies.get("session_id"),
+            access_token=access_token,
         )
 
         return json.dumps(
@@ -174,45 +121,37 @@ def create_app():
 
     @app.route("/me")
     def me():
-        if not Server_Session.token_exists(request.cookies.get("session_id")):
+        if not tokens_exist():
             app.logger.error("No tokens in session.")
             abort(400)
 
-        res_data = api_request(URLs["base"].format(endpoint=URLs["me"]))
+        res_data = sc.me(get_access_token())
 
         return render_template(
             "me.html",
             data=res_data,
-            tokens=session.get("tokens"),
+            tokens=sc.get_tokens(request.cookies.get("session_id")),
             cache_data=session.get("cache_data"),
         )
 
     @app.route("/duplicate_songs")
     def duplicate_songs():
-        if not Server_Session.token_exists(request.cookies.get("session_id")):
+        if not tokens_exist():
             app.logger.error("No tokens in session.")
             abort(400)
 
-        data = {}
-        cache_data = None
+        playlists_per_song = {}
 
         try:
-            with open("playlist_links.pk", "rb") as fi:
-                data = pickle.load(fi)
-
+            with open("songs.pk", "rb") as fi:
+                playlists_per_song = pickle.load(fi)
         except FileNotFoundError as e:
-            print("file not found, continuing to stuff")
-        else:
-            try:
-                with open("songs.pk", "rb") as fi:
-                    cache_data = pickle.load(fi)
-            except FileNotFoundError as e:
-                print("songs not found despite playlists found")
+            print("songs not found")
 
-        if not cache_data:
-            cache_data = parse_data(data)
+        if not playlists_per_song:
+            playlists_per_song = parse_data()
 
-        to_string = print_duplicates(cache_data)
+        to_string = print_duplicates(playlists_per_song)
         print("".join(to_string))
 
         session["cache_data"] = to_string
@@ -221,78 +160,24 @@ def create_app():
 
     @app.route("/recache")
     def recache():
-        if not Server_Session.token_exists(request.cookies.get("session_id")):
+        if not tokens_exist():
             app.logger.error("No tokens in session.")
             abort(400)
 
-        _ = parse_data([])
+        parse_data()
 
         return redirect(url_for("me"))
 
-    def get_full_data():
-        full_data = []
-        res_data = {
-            "next": URLs["base"].format(endpoint=URLs["me"] + URLs["playlists"])
-        }
-
-        while res_data["next"]:
-            res_data = api_request(res_data["next"])
-            for item in res_data["items"]:
-                full_data.append([item["name"], item["tracks"], item["description"]])
-        return full_data
-
-    def get_valid_playlists(full_data, cached_links):
-        playlist_links = {}
-        for playlist_name, playlist_info, description in full_data:
-            if (
-                playlist_info["total"] < 80
-                and playlist_info["total"] >= 10
-                and not (
-                    "Person" in description
-                    or "Archived" in description
-                    or "Exempt" in description
-                )
-                and playlist_name not in cached_links
-            ):
-                playlist_links[playlist_name] = playlist_info["href"]
-        return playlist_links
-
-    def compile_songs(playlist_links):
-        cache_data = collections.defaultdict(list)
-        for name, link in playlist_links.items():
-            song_res = api_request(link)
-
-            for item in song_res["items"]:
-                try:
-                    cache_data[
-                        (item["track"]["name"], item["track"]["artists"][0]["name"])
-                    ].append(name)
-                except TypeError as e:
-                    print("an error has occured\n\n\n\n")
-                    print(item)
-            while song_res["next"]:
-                song_res = api_request(song_res["next"])
-                try:
-                    cache_data[
-                        item["track"]["name"], item["track"]["artists"][0]["name"]
-                    ].append(name)
-                except TypeError as e:
-                    print("an error has occured\n\n\n\n")
-                    print(item)
-        return cache_data
-
-    def parse_data(cached_links):
-        full_data = get_full_data()
-        playlist_links = get_valid_playlists(full_data, cached_links)
-        cache_data = compile_songs(playlist_links)
+    def parse_data():
+        playlists, playlists_per_song = sc.get_songs_in_playlists(get_access_token())
 
         with open("playlist_links.pk", "wb") as fi:
-            pickle.dump(playlist_links, fi)
+            pickle.dump(playlists, fi)
 
         with open("songs.pk", "wb") as fi:
-            pickle.dump(cache_data, fi)
+            pickle.dump(playlists_per_song, fi)
 
-        return cache_data
+        return playlists_per_song
 
     def print_duplicates(cache_data):
         to_string = []
@@ -309,6 +194,5 @@ def create_app():
 
 
 if __name__ == "__main__":
-    Server_Session = server_session.Server_Session()
     app = create_app()
     app.run(debug=True)
