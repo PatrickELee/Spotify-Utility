@@ -2,6 +2,12 @@ from urllib.parse import urlencode
 import json
 import os
 import secrets
+import encoding
+import logging
+
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s', level=logging.DEBUG
+)
 
 import string
 import pickle
@@ -48,6 +54,9 @@ def create_app():
 
     def get_refresh_token():
         return Server_Session.get_refresh_token(request.cookies.get("session_id"))
+    
+    def get_spotify_id():
+        return Server_Session.get_spotify_id_from_session_id(request.cookies.get("session_id"))
 
     def tokens_exist():
         return Server_Session.token_exists(request.cookies.get("session_id"))
@@ -94,10 +103,9 @@ def create_app():
             abort(400)
 
         access_token, refresh_token = sc.get_tokens(code).values()
+        spotify_id = sc.me(access_token)["id"]
 
-        session_id = Server_Session.add_user_token(access_token, refresh_token)
-
-        session["cache_data"] = {"something": "Hello there"}
+        session_id = Server_Session.add_user_token(access_token, refresh_token, spotify_id)
 
         res = make_response(redirect(url_for("me")))
         res.set_cookie("session_id", session_id)
@@ -127,11 +135,13 @@ def create_app():
 
         res_data = sc.me(get_access_token())
 
+        # tokens = Server_Session.get_user_tokens(request.cookies.get("session_id"))
+
         return render_template(
             "me.html",
             data=res_data,
-            tokens=sc.get_tokens(request.cookies.get("session_id")),
-            cache_data=session.get("cache_data"),
+            tokens=Server_Session.get_user_tokens(request.cookies.get("session_id")),
+            cache_data=Server_Session.get_duplicate_user_songs(get_spotify_id()) if Server_Session.is_cur_user_songs_cached(request.cookies.get("session_id")) else {},
         )
 
     @app.route("/duplicate_songs")
@@ -142,21 +152,17 @@ def create_app():
 
         playlists_per_song = {}
 
-        try:
-            with open("songs.pk", "rb") as fi:
-                playlists_per_song = pickle.load(fi)
-        except FileNotFoundError as e:
-            print("songs not found")
-
-        if not playlists_per_song:
+        if Server_Session.is_cur_user_songs_cached(request.cookies.get("session_id")):
+            playlists_per_song = Server_Session.get_duplicate_user_songs(get_spotify_id())
+            logging.info("found in cache")
+        else:
             playlists_per_song = parse_data()
 
-        to_string = print_duplicates(playlists_per_song)
-        print("".join(to_string))
+        # # to_string = print_duplicates(playlists_per_song)
+        # # print("".join(to_string))
 
-        session["cache_data"] = to_string
 
-        return json.dumps(session["cache_data"])
+        return json.dumps(playlists_per_song)
 
     @app.route("/recache")
     def recache():
@@ -170,20 +176,26 @@ def create_app():
 
     def parse_data():
         playlists, playlists_per_song = sc.get_songs_in_playlists(get_access_token())
-
-        with open("playlist_links.pk", "wb") as fi:
-            pickle.dump(playlists, fi)
-
-        with open("songs.pk", "wb") as fi:
-            pickle.dump(playlists_per_song, fi)
+        duplicate_songs = get_duplicates(playlists_per_song)
+        Server_Session.add_duplicate_user_songs(get_spotify_id(), duplicate_songs)
 
         return playlists_per_song
+    
+
+    def get_duplicates(cache_data):
+        duplicates = {}
+        for key, value in cache_data.items():
+            if len(value) > 1:
+                duplicates[key] = value
+        return duplicates
 
     def print_duplicates(cache_data):
         to_string = []
         duplicates_exist = False
+        duplicates = {}
         for key, value in cache_data.items():
             if len(value) > 1:
+                duplicates[key] = value
                 to_string.append(f"{key} appears in {value}\n")
                 duplicates_exist = True
         if not duplicates_exist:

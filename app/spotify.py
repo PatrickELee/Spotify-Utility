@@ -1,5 +1,6 @@
 import collections
 import requests
+import encoding
 
 import os
 
@@ -82,7 +83,9 @@ class Spotify_Client:
 
                 for item in song_res["items"]:
                     playlists_per_song[
-                        (item["track"]["name"], item["track"]["artists"][0]["name"])
+                        encoding.encode_set(
+                            (item["track"]["name"], item["track"]["artists"][0]["name"])
+                        )
                     ].append(name)
 
         return (playlists, playlists_per_song)
